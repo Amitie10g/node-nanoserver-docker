@@ -1,0 +1,133 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule: 
+   - cron: '0 12 * * 0'
+
+env:
+  img_name: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME}}
+  baseURL: "https://nodejs.org/dist/"
+  versionPattern: "node-v(\\d+\\.\\d+\\.\\d+)-win-x64\\.zip"
+  node_versions: |
+    @(
+      "latest-v10.x/",
+      "latest-v11.x/",
+      "latest-v12.x/",
+      "latest-v13.x/",
+      "latest-v14.x/",
+      "latest-v15.x/",
+      "latest-v16.x/",
+      "latest-v17.x/",
+      "latest-v18.x/",
+      "latest-v19.x/",
+      "latest-v20.x/",
+      "latest-v4.x/",
+      "latest-v5.x/",
+      "latest-v6.x/",
+      "latest-v7.x/",
+      "latest-v8.x/",
+      "latest-v9.x/"
+    )
+
+  node_versions_elements: |
+    @(
+      "latest-argon",
+      "latest-boron",
+      "latest-carbon",
+      "latest-dubnium",
+      "latest-erbium",
+      "latest-fermium",
+      "latest-gallium",
+      "latest-hydrogen"
+    )
+
+jobs:
+  Build:
+    strategy:
+      matrix:
+        winver: ["2022", "2019"]
+    runs-on: windows-${{ matrix.winver }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build
+        run: |
+          $versionHashTable = @{}
+          foreach ($dir in ${{ env.node_versions_elements }}) {
+            $url = "${{ env.baseURL }}$dir"              
+            $htmlContent = Invoke-WebRequest -Uri $url
+            $links = $htmlContent.Links | Where-Object { $_.href -match '${{ env.versionPattern }}' }
+
+            foreach ($link in $links) {
+              $version = [regex]::Match($link.href,'${{ env.versionPattern }}').Groups[1].Value
+              $elementName = ($dir -split '-')[1]
+              $versionHashTable[$elementName] = $version
+            }
+          }
+
+          $versionNumbers = @()
+          foreach ($dir in ${{ env.node_versions }}) {
+            $url = "${{ env.baseURL }}$dir"
+            $htmlContent = Invoke-WebRequest -Uri $url
+            $links = $htmlContent.Links | Where-Object { $_.href -match '${{ env.versionPattern }}' }
+
+            foreach ($link in $links) {
+              $version = [regex]::Match($link.href,'${{ env.versionPattern }}').Groups[1].Value
+              $versionNumbers += $version
+            }
+          }
+
+          $uniqueVersions = $versionNumbers | Select-Object -Unique
+          $sortedUniqueVersions = $uniqueVersions | Sort-Object { [version]$_ }
+          $NodeJSversions = $sortedUniqueVersions
+
+          foreach ($version in $NodeJSversions) {
+            $majorVersion = $version -replace '^(\d+)\..*', '$1'
+
+            $TAGS1 = " -t ${{ env.img_name }}:$version-ltsc${{ matrix.winver }} -t ${{ env.img_name }}:$majorVersion-ltsc${{ matrix.winver }}"
+            $TAGS2 = " -t ${{ env.img_name }}:$version-pwsh-ltsc${{ matrix.winver }} -t ${{ env.img_name }}:$majorVersion-pwsh-ltsc${{ matrix.winver }}"           
+
+            if ( $NodeJSversions[-1] -eq $version ) {
+              $TAGS1 += " -t ${{ env.img_name }}:ltsc${{ matrix.winver }}"
+              $TAGS2 += " -t ${{ env.img_name }}:pwsh-ltsc${{ matrix.winver }}"
+            }
+
+            if ( ${{ strategy.job-index }} -eq 0 ) {
+              $TAGS1 += " -t ${{ env.img_name }}:$version -t ${{ env.img_name }}:$majorVersion"
+              $TAGS2 += " -t ${{ env.img_name }}:$version-pwsh -t ${{ env.img_name }}:$majorVersion-pwsh"
+
+              if ( echo $NodeJSversions[-1] -eq $version ) {
+                $TAGS1 += " -t ${{ env.img_name }}"
+                $TAGS2 += " -t ${{ env.img_name }}:pwsh"
+              }
+            }
+
+            foreach ($element in $versionHashTable.Keys) {
+              $versionElement = $versionHashTable[$element]
+              if ($versionElement -eq $version){
+                $TAGS1 += " -t ${{ env.img_name }}:$element-ltsc${{ matrix.winver }}"
+                $TAGS2 += " -t ${{ env.img_name }}:$element-pwsh-ltsc${{ matrix.winver }}"
+            
+                if ( echo $NodeJSversions[-1] -eq $version ) {
+                  $TAGS1 += " -t ${{ env.img_name }}:$element"
+                  $TAGS2 += " -t ${{ env.img_name }}:$element-pwsh"
+                }
+              }
+            }
+
+            cmd /c "docker build $TAGS1 --build-arg NODE_VER=$version --build-arg CONT_VER=ltsc${{ matrix.winver }} ."
+            if ( ${{ strategy.job-index }} -eq 0 ) {
+              cmd /c "docker build $TAGS2 --build-arg NODE_VER=$version --build-arg CONT_VER=nanoserver-ltsc${{ matrix.winver }} --build-arg BASE_IMG=powershell ."
+            }
+          }
+      - name: Push
+        run: docker push "${{ env.img_name }}" --all-tags
