@@ -24,6 +24,7 @@ This project is intended to be used as base image for other Node-based projects.
 If you need to install system-wide software, you need to set `USER` as `ContainerAdministrator`
 
 ## Building
+Containers for this project has been built using [GitHub Actions](https://github.com/features/actions) for automated weekly builds from 4 to 20 under Windows Nano Server ltsc2022 and ltsc2019. GitHub provides runners only for Windows Server 2022 (ltsc2022) and Server 2019 (ltsc2019) and no [hyperv isolation](https://docs.docker.com/engine/reference/commandline/build/#isolation) is supported. If you need other versions of Windows, follow this instructions.
 
     docker build $TAGS --build-arg NODE_VER=<node version> --build-arg BASE_IMG=<base image> --build-arg CONT_VER=<container version> .
 Where,
@@ -31,8 +32,6 @@ Where,
 * ``NODE_VER`` is used to download Node from ``https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-win-x64.zip``
 * ``BASE_IMG`` is the base image, either ``windows/nanoserver`` or ``powershell``
 * ``CONT_VER`` is the tag available for each base image. For a full list of available tags, consult the respective page of the base images provided (links above).
-
-Don't use ``1809`` or ``ltsc2019`` due there are issues when appending a directory to PATH
 
 `build.ps1` is provided for bulk building every Node versions available.
 
